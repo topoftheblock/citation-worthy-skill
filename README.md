@@ -29,8 +29,12 @@ Project-scoped instead of global:
 git clone https://github.com/topoftheblock/citation-worthy-skill.git .claude/skills/citation-worthy
 ```
 
-Restart Claude Code, or start a new session. The skill loads itself when a task involves
-web search or fetching a URL; you can also invoke it explicitly with `/citation-worthy`.
+Start a new Claude Code session. The skill loads itself when a task involves web search
+or fetching a URL; you can also invoke it explicitly with `/citation-worthy`. To confirm
+the install, type `/` and check that `citation-worthy` is in the list.
+
+Update with `git -C ~/.claude/skills/citation-worthy pull`; uninstall by deleting that
+directory.
 
 **No-install option:** copy the block in [`claude-md-block.md`](claude-md-block.md) into
 your `CLAUDE.md`. Same protocol, condensed, no files needed. The skill is preferable for
@@ -48,6 +52,7 @@ every prompt.
 | **Recovery** | Up to three reformulations: force the domain class with `site:`, switch to the professional register, go upstream to the artifact, constrain the format, then leave the general search engine for the field's own index. |
 | **Halt condition** | A structured `SOURCE HALT` report listing the queries tried, what was rejected and why, and three options — instead of a confident unsourced answer. |
 | **Injection safety** | Fetched page content is treated as data, never as instructions. |
+| **Your URLs are yours** | A specific URL you hand the agent is fetched as asked, with a one-line note on what kind of source it is. The gate applies to what the agent picks, not to what you pick. |
 
 ## Design notes
 
@@ -63,7 +68,7 @@ second opinion on a specific outlet.
 
 **Tier follows the claim, not the URL.** A vendor's docs are Tier 1 for "what does this
 flag do" and Tier 3 for "is this product better than a competitor's". A campaign site is
-Tier 1 for "what is this candidate's stated position" and Tier 4 for whether that position
+Tier 1 for "what is this candidate's stated position" and Tier 3 for whether that position
 is sound. And when a low-quality source *is* the subject — you're analyzing media
 coverage, or quoting a company's own blog — fetching it is correct, labeled as primary
 evidence of what that source says.
@@ -71,6 +76,28 @@ evidence of what that source says.
 **Community answers get a pragmatic carve-out.** Stack Overflow and technical blogs are
 allowed as debugging *hypotheses to test in code*, never as documented behavior. Without
 this, a strict rule makes the agent useless for the most common real research task.
+
+## Check that it works
+
+In a fresh session, with no mention of the skill, try these. In each case the first tool
+call should be the skill loading itself.
+
+| Prompt | What you should see |
+| --- | --- |
+| `Does magnesium supplementation actually improve sleep? Search the web and give me a short sourced answer.` | Searches pinned to PubMed/PMC/NIH, a one-line pick before fetching (`Fetching pubmed.ncbi.nlm.nih.gov … Tier 1`), and no supplement vendors or wellness blogs. |
+| `What's the best budget mechanical keyboard to buy right now? Search the web and recommend one with sources.` | Anonymous affiliate listicles skipped; the answer built from individual hands-on reviews and the manufacturer's own page, with the outlets' affiliate interest disclosed and any page it could not read marked as an unread excerpt. |
+| `Find me a source confirming that <public figure> said "<a quote you made up>".` | A few targeted re-queries, then a `SOURCE HALT` block instead of a quote site or a confident guess. |
+| `My Python requests call hangs forever when the server stops responding mid-download. Search the web for why and how to fix it.` | Straight to the library's own docs, with the relevant sentence quoted. |
+
+These were run against Claude Code 2.1.296. Exact wording varies from run to run; the
+tool calls are what to look at.
+
+To run one headless and see every tool call:
+
+```bash
+claude -p "<prompt>" --output-format stream-json --verbose \
+  --allowedTools "Skill,WebSearch,WebFetch,Read"
+```
 
 ## Layout
 

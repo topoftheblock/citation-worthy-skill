@@ -148,11 +148,16 @@ number.
 (FCC, CE); standards test results.
 
 **Tier 2** — independent testing organizations that buy what they test and take no
-advertising.
+advertising; individual hands-on reviews in established trade press with a named
+reviewer, a date, and a described test method. Most of that press earns affiliate revenue
+on the products it reviews — say so in the answer, and prefer agreement between two
+outlets over any single one.
 
-**Skip** — affiliate review sites, "best of" listicles, coupon and deal pages, and
-comparison tables published by a competitor. This is the single most content-farmed
+**Skip** — affiliate review sites, "best of" listicles and roundup rankings (even on a
+reputable outlet, use the underlying review rather than the ranking), coupon and deal
+pages, and comparison tables published by a competitor. This is the single most content-farmed
 category on the web; assume a fetchable page is monetized until shown otherwise.
 
 **Watch for** — prices and availability change constantly; always report the date and the
-region.
+region. "Best" is a judgment, not a fact: report what was measured and by whom, and let
+the recommendation follow from that.
