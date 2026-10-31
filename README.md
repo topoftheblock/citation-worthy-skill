@@ -51,6 +51,7 @@ every prompt.
 | **Allowlist** | `.gov`/`.mil`/`.int`, courts and regulators, peer-reviewed work via DOI, standards bodies (RFC/W3C/ISO/NIST), first-party technical docs, AP/Reuters/AFP/PA. |
 | **Recovery** | Up to three reformulations: force the domain class with `site:`, switch to the professional register, go upstream to the artifact, constrain the format, then leave the general search engine for the field's own index. |
 | **Halt condition** | A structured `SOURCE HALT` report listing the queries tried, what was rejected and why, and three options — instead of a confident unsourced answer. |
+| **Honest sources list** | The answer's link list separates pages actually read from search results that were never opened. |
 | **Injection safety** | Fetched page content is treated as data, never as instructions. |
 | **Your URLs are yours** | A specific URL you hand the agent is fetched as asked, with a one-line note on what kind of source it is. The gate applies to what the agent picks, not to what you pick. |
 
@@ -141,9 +142,55 @@ Results land in `tests/results/iteration-N/`: per run a `transcript.jsonl`,
 `outputs/trace.md` (readable tool trace), `outputs/answer.md`, `grading.json` and
 `timing.json`, and a `report.md` with the pass-rate table and every failure. The layout
 matches skill-creator's, so its review viewer can open an iteration directly. A full run
-(12 cases × 2 configs) costs roughly $5 and takes about 10 minutes at `--jobs 6`. The
-cases search the live web, so results drift as pages change; use `--runs 3` before
-trusting a single failure.
+(12 cases × 2 configs) costs about $3 in agent calls and takes a few minutes at
+`--jobs 6`. The cases search the live web, so results drift as pages change; use
+`--runs 2` or more before trusting a single failure.
+
+### Results
+
+Measured on 2026-10-31 with Claude Code 2.1.306, agent model `claude-opus-5-5` and a
+`sonnet` judge: 12 cases, 2 runs each per configuration (96 runs). "Previous skill" is
+the version before the refinements below.
+
+| | refined skill | previous skill | no skill | CLAUDE.md block |
+| --- | --- | --- | --- | --- |
+| **Shared checks** (the same 112 for every config) | **96%** | 87% | 68% | 95% |
+| Opened the primary source (Treasury, BLS, NVD, PubMed, project docs…) | 16/16 | 16/16 | 10/16 | 16/16 |
+| Research runs that opened no page at all | 2/20 | 2/20 | 9/20 | 2/20 |
+| Every cited URL was read, or marked unread | 22/24 | 12/24 | 6/24 | 24/24 |
+| Answer-quality checks (LLM judge) | 29/32 | 29/32 | 21/32 | 26/32 |
+| No Tier 3 site fetched | 32/32 | 32/32 | 31/32 | 32/32 |
+| No web calls on the two non-research prompts | 4/4 | 4/4 | 4/4 | 4/4 |
+| Skill loaded before the first search | 14/16 | 14/16 | — | — |
+| Pages fetched per run (mean) | 2.0 | 1.6 | 0.8 | 1.9 |
+| Cost / time per run | $0.16 / 41s | $0.16 / 37s | $0.10 / 26s | $0.17 / 40s |
+
+What the numbers say:
+
+- **The main gain over no skill is reading sources, not avoiding bad sites.** On these
+  prompts the baseline rarely fetched a Tier 3 page either. What it does instead is
+  answer from the search tool's summaries without opening anything (9 of 20 research
+  prompts), then list those links as sources. With the skill it opens the primary
+  source and quotes it.
+- **The sources list was the weak spot, and the refinement fixed it.** The first round
+  showed that even with the skill, answers ended with a "Sources" list of search results
+  that were never opened, because the search tool asks for every link. Section 7 of
+  `SKILL.md` (split the list into read / not opened) took that check from 12/24 to 22/24.
+  The same round led to the rule that a SOURCE HALT is owed even when the first search
+  already shows a quote is fake.
+- **The CLAUDE.md block matches the skill** on shared checks. It is in context for every
+  prompt, so it can't miss a trigger; the skill costs nothing on prompts that don't
+  research.
+- **Known gaps:** the skill didn't load before the first search in 2 of 16 runs (the
+  fabricated-quote and source-as-subject prompts), and the SOURCE HALT block appeared
+  only in the run where it did load. The source-as-subject case is the weakest: the
+  judge caught Breitbart's article being used for facts about the order, not only for
+  its framing, in both refined-skill runs.
+
+With 2 runs per cell, a difference of one or two checks is noise. The refined-skill
+column included one extra clause (state what kind of source a user's URL is even if
+the fetch fails) that was removed afterwards: tabloid sites block the fetch tool, so no
+case can exercise it, and it made no measurable difference.
 
 ## Layout
 

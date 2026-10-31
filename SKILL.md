@@ -17,9 +17,10 @@ front of the person who wrote the primary source.**
 ## The loop
 
 ```
-SEARCH  ->  TRIAGE (no fetch)  ->  FETCH Tier 1/2 only  ->  VERIFY on-page
-              |                                                |
-              +--> nothing acceptable --> RECOVER (<=3 tries) --+--> still nothing --> HALT
+SEARCH  ->  TRIAGE (no fetch)  ->  FETCH Tier 1/2 only  ->  VERIFY on-page  ->  ANSWER
+              |                                                |              (cite only
+              +--> nothing acceptable --> RECOVER (<=3 tries) --+               what you read)
+                                                               +--> still nothing --> HALT
 ```
 
 ## 1. Pre-fetch triage — evaluate before you open anything
@@ -213,6 +214,12 @@ Options:
   3. I proceed and mark this point as unverified.
 ```
 
+Use this block whenever the user asked for a source and you are concluding there isn't
+one you can stand behind — including when the first search already makes it obvious the
+claim is fabricated or misattributed. You don't have to spend all three reformulations to
+reach that conclusion, but you do owe the report: it shows the user what was searched
+and rejected, which a prose "I couldn't find it" does not.
+
 Then continue with the rest of the task. One unsupported claim halts that claim, not the
 whole job — finish everything else and list what you left unverified.
 
@@ -242,7 +249,25 @@ Fetching a Tier 1 domain does not make the page correct. Before you rely on it:
   search excerpt and mark the claim unverified.
 - Cite what you used: title, publisher, date, URL. If you can't cite it, don't use it.
 
-## 7. Cost control
+## 7. The sources list — only what you read
+
+Readers skim the link list at the bottom, not the caveats in your prose, so the list is
+where an unread page most easily passes for a source. Your search tool may tell you to
+end with every relevant link; do that honestly by splitting it:
+
+```
+Sources (read):
+- <title> — <publisher>, <date> — <url>
+
+Seen in search results, not opened:
+- <title> — <url>            (or leave these out)
+```
+
+A page whose fetch failed or came back empty belongs in the second group, marked
+`(fetch failed)`. Never put a Tier 3 page you deliberately skipped in the first group,
+and don't write "sources checked" above links you only saw as search results.
+
+## 8. Cost control
 
 Source discipline should make research cheaper, not slower. Two or three well-chosen
 Tier 1 fetches beat ten hedging ones, and skipping triage to "just grab a few pages"

@@ -25,6 +25,7 @@ skills, CLAUDE.md and MCP servers stay out of it. These are real, billed model r
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -258,10 +259,64 @@ def describe(check: dict) -> str:
         "max_fetches": f"At most {check.get('n')} fetches",
         "no_web": "No web search or fetch is made",
         "no_refusal_to_fetch": "The URL the user supplied is fetched rather than refused",
+        "cited_urls_read": "Every URL cited in the answer was actually fetched, or is marked as unread / failed",
     }[t]
 
 
-def check_deterministic(check: dict, trace: dict) -> tuple[bool, str]:
+URL_RX = re.compile(r"https?://[^\s)\]>\"'`]+")
+# A line that says the page behind its URL was not read passes the cited_urls_read check.
+UNREAD_RX = re.compile(
+    r"unread|not read|not opened|n['’]t (open|read|load|fetch|access|reach|get)|did not (open|read|load)|"
+    r"could not (open|read|load|fetch|access|reach|get)|unable to|search (result|excerpt|snippet)|"
+    r"excerpt|snippet|blocked|failed|forbidden|40[13]|paywall|not fetched|not verified|unverified", re.I)
+
+
+def _norm(url: str) -> str:
+    u = urlparse(url.rstrip(".,;:*_"))
+    host, path = u.netloc.lower().removeprefix("www."), u.path.rstrip("/")
+    if host == "ncbi.nlm.nih.gov" and path.startswith("/pmc/"):  # old and new PMC URLs, same page
+        host, path = "pmc.ncbi.nlm.nih.gov", path[4:]
+    host = {"docs.python-requests.org": "requests.readthedocs.io"}.get(host, host)  # redirect alias
+    return f"{host}{path}"
+
+
+def _fetch_failed(step: dict) -> bool:
+    res = step["result"] or ""
+    return step["is_error"] or bool(re.search(r"HTTP (4|5)\d\d|unable to fetch|Forbidden", res[:300], re.I))
+
+
+def check_cited_urls_read(trace: dict, prompt: str) -> tuple[bool, str]:
+    """Every URL in the final answer was fetched successfully, or its line marks it as unread/failed.
+
+    A label line ending in ':' (e.g. 'Search results I did not open:') covers the list under it.
+    URLs the user typed into the prompt, and URLs inside code, are exempt. A run that made no
+    web calls passes: its URLs are examples, not citations of research it did."""
+    if not tools(trace, "WebSearch") and not tools(trace, "WebFetch"):
+        return True, "no web calls (n/a)"
+    answer = re.sub(r"```.*?```", "", trace["answer"] or "", flags=re.S)
+    answer = re.sub(r"`[^`\n]*`", "", answer)
+    read = {_norm(s["input"].get("url", "")) for s in tools(trace, "WebFetch") if not _fetch_failed(s)}
+    given = {_norm(u) for u in URL_RX.findall(prompt)}
+    bad, label = [], ""
+    for line in answer.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        urls = URL_RX.findall(line)
+        if not urls and (stripped.endswith(":") or stripped.endswith(":**") or stripped.startswith("#")):
+            label = stripped
+            continue
+        for u in urls:
+            n = _norm(u)
+            if n in read or n in given or UNREAD_RX.search(line) or UNREAD_RX.search(label):
+                continue
+            bad.append(u)
+    total = len(URL_RX.findall(answer))
+    return not bad, (f"{len(bad)} of {total} cited URLs never read and not marked: {bad[:5]}" if bad
+                     else f"all {total} cited URLs read or marked")
+
+
+def check_deterministic(check: dict, trace: dict, prompt: str = "") -> tuple[bool, str]:
     t = check["type"]
     urls = fetched_urls(trace)
     if t == "skill_loaded_first":
@@ -305,6 +360,8 @@ def check_deterministic(check: dict, trace: dict) -> tuple[bool, str]:
     if t == "no_web":
         n = len(tools(trace, "WebSearch")) + len(urls)
         return n == 0, f"{n} web calls"
+    if t == "cited_urls_read":
+        return check_cited_urls_read(trace, prompt)
     raise ValueError(f"unknown check type {t}")
 
 
@@ -328,10 +385,24 @@ Reply with JSON only, no prose and no code fence, in exactly this shape:
 """
 
 
-def run_judge(case: dict, trace: dict, checks: list[dict], args) -> list[tuple[bool, str]]:
+def run_judge(case: dict, trace: dict, checks: list[dict], args, run_dir: Path) -> list[tuple[bool, str]]:
+    """Ask the judge model; verdicts are cached per (judge model, prompt) so a regrade is stable."""
     statements = "\n".join(f"{i + 1}. {c['text']}" for i, c in enumerate(checks))
     prompt = JUDGE_PROMPT.format(prompt=case["prompt"], trace=render_trace(trace, limit=700),
                                  statements=statements)
+    cache_file = run_dir / "judge_cache.json"
+    key = hashlib.sha256(f"{args.judge_model}\n{prompt}".encode()).hexdigest()
+    cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
+    if key in cache:
+        return [tuple(v) for v in cache[key]]
+    verdicts = _ask_judge(prompt, len(checks), args)
+    if not any(ev.startswith("[judge error]") for _, ev in verdicts):
+        cache[key] = verdicts
+        cache_file.write_text(json.dumps(cache, indent=2))
+    return verdicts
+
+
+def _ask_judge(prompt: str, n: int, args) -> list[tuple[bool, str]]:
     work = Path(tempfile.mkdtemp(prefix="cw-judge-"))
     try:
         proc = subprocess.run(
@@ -343,9 +414,9 @@ def run_judge(case: dict, trace: dict, checks: list[dict], args) -> list[tuple[b
         parsed = json.loads(text[text.index("{"): text.rindex("}") + 1])
         by_id = {r["id"]: r for r in parsed["results"]}
         return [(bool(by_id[i + 1]["passed"]), "[judge] " + by_id[i + 1].get("evidence", ""))
-                for i in range(len(checks))]
+                for i in range(n)]
     except Exception as e:  # a judge failure is a failed grade, never a pass
-        return [(False, f"[judge error] {e}") for _ in checks]
+        return [(False, f"[judge error] {e}") for _ in range(n)]
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -358,18 +429,20 @@ def grade_run(case: dict, global_checks: list[dict], config: str, run_dir: Path,
     llm = [c for c in checks if c["type"] == "judge"]
     expectations = []
     for c in det:
-        ok, ev = check_deterministic(c, trace)
-        expectations.append({"text": describe(c), "passed": ok, "evidence": ev})
+        ok, ev = check_deterministic(c, trace, case["prompt"])
+        expectations.append({"text": describe(c), "passed": ok, "evidence": ev,
+                             "skill_only": bool(c.get("skill_only"))})
     if llm:
         if not trace["answer"]:
             verdicts = [(False, "no final answer")] * len(llm)
         elif args.no_judge:
             verdicts = None
         else:
-            verdicts = run_judge(case, trace, llm, args)
+            verdicts = run_judge(case, trace, llm, args, run_dir)
         if verdicts:
             for c, (ok, ev) in zip(llm, verdicts):
-                expectations.append({"text": c["text"], "passed": ok, "evidence": ev})
+                expectations.append({"text": c["text"], "passed": ok, "evidence": ev,
+                                     "skill_only": bool(c.get("skill_only"))})
     passed = sum(e["passed"] for e in expectations)
     counts: dict[str, int] = {}
     for s in tools(trace):
@@ -442,7 +515,20 @@ def report(iteration: Path) -> str:
         t = sum(r["grading"]["summary"]["total"] for r in runs)
         return p, t
 
-    lines = [f"# citation-worthy eval — {iteration.name}", ""]
+    # Checks every configuration is graded on (skill_only ones excluded), for a like-for-like row.
+    shared = {c: [0, 0] for c in configs}
+    for case in rows:
+        for c in configs:
+            for r in rows[case].get(c, []):
+                for e in r["grading"]["expectations"]:
+                    if not e.get("skill_only"):
+                        shared[c][0] += e["passed"]
+                        shared[c][1] += 1
+
+    lines = [f"# citation-worthy eval — {iteration.name}", "",
+             "Cells are passed/total checks, summed over runs. `total` includes skill-only checks "
+             "(skill loaded first, tier pick line, SOURCE HALT format); `shared checks only` is the "
+             "like-for-like comparison across configurations.", ""]
     lines.append("| case | " + " | ".join(configs) + " |")
     lines.append("|---|" + "---|" * len(configs))
     totals = {c: [0, 0, 0.0, 0.0, 0] for c in configs}  # passed, total, cost, seconds, runs
@@ -464,6 +550,8 @@ def report(iteration: Path) -> str:
         lines.append(f"| {case} | " + " | ".join(cells) + " |")
     lines.append("| **total** | " + " | ".join(
         f"**{totals[c][0]}/{totals[c][1]} ({totals[c][0] / max(totals[c][1], 1):.0%})**" for c in configs) + " |")
+    lines.append("| **shared checks only** | " + " | ".join(
+        f"**{shared[c][0]}/{shared[c][1]} ({shared[c][0] / max(shared[c][1], 1):.0%})**" for c in configs) + " |")
     lines.append("| cost / run | " + " | ".join(
         f"${totals[c][2] / max(totals[c][4], 1):.2f}" for c in configs) + " |")
     lines.append("| time / run | " + " | ".join(
@@ -518,10 +606,10 @@ def cmd_run(args) -> None:
                 g = grade_run(case, global_checks, config, rd, args)
                 cost += timing.get("cost_usd") or 0
                 s = g["summary"]
-                print(f"  {case:34} {config:13} {s['passed']}/{s['total']}  "
+                print(f"  {case['name']:34} {config:13} {s['passed']}/{s['total']}  "
                       f"{timing['total_duration_seconds']:>5.0f}s  ${timing.get('cost_usd') or 0:.2f}", flush=True)
             except Exception as e:
-                print(f"  {case:34} {config:13} FAILED: {e}", flush=True)
+                print(f"  {case['name']:34} {config:13} FAILED: {e}", flush=True)
     print(f"\ntotal agent cost ${cost:.2f} (judge calls not included)\n")
     print(report(iteration))
 

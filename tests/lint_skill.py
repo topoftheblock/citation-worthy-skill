@@ -94,6 +94,8 @@ for concept, rx in {
     "unread-snippet rule": r"(unread search excerpt|unread excerpt)",
     "domain-filter preference": r"allow(/| )block list|domain filter",
     "lookalike domains": r"lookalike",
+    "split sources list": r"Seen in search results, not opened",
+    "halt even when fabrication is obvious": r"obvious the claim is fabricated",
 }.items():
     flat_skill, flat_block = " ".join(skill.split()), " ".join(block.split())
     check(bool(re.search(rx, flat_skill)) and bool(re.search(rx, flat_block)), f"both cover: {concept}")
