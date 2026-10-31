@@ -99,16 +99,67 @@ claude -p "<prompt>" --output-format stream-json --verbose \
   --allowedTools "Skill,WebSearch,WebFetch,Read"
 ```
 
+## Testing
+
+Two layers, both in `tests/`:
+
+```bash
+python3 tests/lint_skill.py     # static checks, free; also runs in CI on every push
+python3 tests/evals.py run      # behavioral evals: real, billed `claude -p` runs
+```
+
+**`lint_skill.py`** checks the frontmatter against Claude Code's limits, that every
+reference file is linked and exists, and that `SKILL.md` and `claude-md-block.md` still
+agree on the recovery budget, the halt template and the key rules.
+
+**`evals.py`** runs every case in [`tests/cases.json`](tests/cases.json) through headless
+Claude Code in a throwaway project with `--setting-sources project`, so your own skills,
+`CLAUDE.md` and MCP servers stay out of it. Each case runs with the skill and without it,
+and the trace is graded two ways:
+
+- **From the tool calls** (deterministic): did the skill load before the first search,
+  was a `Tier N` pick stated before the first fetch, which domains were fetched (must hit
+  the primary source, must not touch quote mills, stat farms, affiliate listicles…), did
+  a `SOURCE HALT` fire, was the web left alone on tasks that don't need it.
+- **By an LLM judge** (`--judge-model`, default `sonnet`) for what needs reading the
+  answer: affiliate interest disclosed, injected instruction reported, the right
+  technical nuance stated.
+
+The cases cover medicine, shopping, a fabricated quote, debugging, fiscal figures, a
+CVE, a stat-farm-dominated statistic, a user-supplied tabloid URL, a partisan outlet as
+the *subject* of research, a prompt injection in a saved page, and two near-miss
+prompts where the skill should stay out of the way.
+
+```bash
+python3 tests/evals.py run --cases fabricated-quote --runs 3       # one case, check variance
+python3 tests/evals.py run --configs with_skill,old_skill --baseline-ref HEAD   # did my edit help?
+python3 tests/evals.py run --configs with_skill,claude_md          # skill vs. the CLAUDE.md block
+python3 tests/evals.py grade tests/results/iteration-1             # regrade without rerunning
+```
+
+Results land in `tests/results/iteration-N/`: per run a `transcript.jsonl`,
+`outputs/trace.md` (readable tool trace), `outputs/answer.md`, `grading.json` and
+`timing.json`, and a `report.md` with the pass-rate table and every failure. The layout
+matches skill-creator's, so its review viewer can open an iteration directly. A full run
+(12 cases × 2 configs) costs roughly $5 and takes about 10 minutes at `--jobs 6`. The
+cases search the live web, so results drift as pages change; use `--runs 3` before
+trusting a single failure.
+
 ## Layout
 
 ```
 citation-worthy/
 ├── SKILL.md                        # the protocol the agent follows
 ├── claude-md-block.md              # condensed drop-in block for CLAUDE.md
-└── references/
-    ├── red-flags.md                # classifying an unfamiliar domain
-    ├── source-tiers.md             # where Tier 1 lives, field by field
-    └── search-operators.md         # recovery queries with worked examples
+├── references/
+│   ├── red-flags.md                # classifying an unfamiliar domain
+│   ├── source-tiers.md             # where Tier 1 lives, field by field
+│   └── search-operators.md         # recovery queries with worked examples
+└── tests/
+    ├── lint_skill.py               # static checks
+    ├── evals.py                    # behavioral eval runner + grader
+    ├── cases.json                  # eval cases and their checks
+    └── fixtures/                   # files placed into a case's working dir
 ```
 
 `SKILL.md` is what loads when the skill triggers. The `references/` files are read only
