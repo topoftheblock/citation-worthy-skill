@@ -1,0 +1,25 @@
+{
+  "_doc": "Trigger eval for the skill description: should the skill load before the first web search or fetch? `split` keeps a held-out test set so a description isn't tuned to the queries it is scored on. Run: python3 tests/evals.py triggers",
+  "queries": [
+    {"split": "train", "should_trigger": true,  "query": "Find me a source confirming that Einstein said \"If you can't explain it simply, you don't understand it well enough.\" It's going on the first slide of my onboarding deck."},
+    {"split": "train", "should_trigger": true,  "query": "I'm putting together a reading for my journalism seminar: find how Fox News and The Guardian each covered the 2024 Boeing door-plug blowout in their first-day stories and compare the framing."},
+    {"split": "train", "should_trigger": true,  "query": "is it true that we only use 10% of our brains? my nephew keeps saying it, look it up"},
+    {"split": "train", "should_trigger": true,  "query": "What's the current LTS version of Node.js and when does it go end-of-life? Check online, I need it for our upgrade ticket."},
+    {"split": "train", "should_trigger": true,  "query": "A LinkedIn post claims remote workers are 13% more productive than office workers. Track down the original study it's based on."},
+    {"split": "train", "should_trigger": true,  "query": "can you look up what the EU AI Act actually says about emotion recognition in the workplace? need the article number"},
+    {"split": "test" , "should_trigger": true,  "query": "Verify this attribution for me before I tweet it: Ruth Bader Ginsburg supposedly said \"Real change, enduring change, happens one step at a time.\" Where and when did she say it?"},
+    {"split": "test" , "should_trigger": true,  "query": "For a media studies assignment, pull up how Jacobin and the Wall Street Journal editorial page wrote about the 2023 UAW strike and contrast their language."},
+    {"split": "test" , "should_trigger": true,  "query": "How much did US egg prices rise in 2025? search and give me the official number"},
+    {"split": "test" , "should_trigger": true,  "query": "Our pentest report flags CVE-2023-44487. Look up whether nginx 1.24 is affected and what the fix is."},
+    {"split": "train", "should_trigger": false, "query": "Format these three references in APA 7th edition: Smith 2019 Nature paper on coral bleaching, a 2021 WHO report on air quality, and a NYT article from March 2022. I'll paste the details below. Don't look anything up, just format."},
+    {"split": "train", "should_trigger": false, "query": "Write a Python scraper with requests and BeautifulSoup that pulls headlines from a news homepage URL passed on the command line. Just the code, I'll run it myself."},
+    {"split": "train", "should_trigger": false, "query": "Draft a 300-word op-ed arguing that cities should ban cars from downtown on weekends. Persuasive tone, no need for citations."},
+    {"split": "train", "should_trigger": false, "query": "In my Claude Code settings.json, how do I allow WebFetch only for docs.python.org? Just edit .claude/settings.json in this repo."},
+    {"split": "train", "should_trigger": false, "query": "Rewrite this paragraph so it sounds less academic: 'The extant literature substantively demonstrates a heterogeneous array of outcomes vis-a-vis remote work productivity.'"},
+    {"split": "train", "should_trigger": false, "query": "Explain from what you already know, in plain words, what a DOI is and why journal articles have them. No need to search."},
+    {"split": "test" , "should_trigger": false, "query": "Write unit tests for a function rank_sources(urls) that sorts URLs so .gov and .edu come first. Pytest, no network calls."},
+    {"split": "test" , "should_trigger": false, "query": "Help me outline a blog post about how to spot misinformation online: five sections with a one-line summary each. Outline only."},
+    {"split": "test" , "should_trigger": false, "query": "What's 17.5% of 2,340? And round it to the nearest ten."},
+    {"split": "test" , "should_trigger": false, "query": "Turn my notes into a bulleted meeting summary: we agreed to ship v2 on Friday, Sara owns QA, the pricing page still needs legal review."}
+  ]
+}

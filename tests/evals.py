@@ -402,7 +402,16 @@ def run_judge(case: dict, trace: dict, checks: list[dict], args, run_dir: Path) 
     return verdicts
 
 
-def _ask_judge(prompt: str, n: int, args) -> list[tuple[bool, str]]:
+def _ask_judge(prompt: str, n: int, args, attempts: int = 2) -> list[tuple[bool, str]]:
+    """One retry: the judge occasionally returns malformed JSON."""
+    for _ in range(attempts):
+        verdicts = _ask_judge_once(prompt, n, args)
+        if not any(ev.startswith("[judge error]") for _, ev in verdicts):
+            break
+    return verdicts
+
+
+def _ask_judge_once(prompt: str, n: int, args) -> list[tuple[bool, str]]:
     work = Path(tempfile.mkdtemp(prefix="cw-judge-"))
     try:
         proc = subprocess.run(
@@ -569,6 +578,104 @@ def report(iteration: Path) -> str:
     return md
 
 
+# --------------------------------------------------------------------------- trigger eval
+
+
+def set_description(skill_md: str, description: str) -> str:
+    return re.sub(r"(?m)^description: .*$", lambda _: "description: " + description, skill_md, count=1)
+
+
+def trigger_once(query: str, description: str | None, args) -> bool | None:
+    """True if the skill loads before the first web search/fetch; None if the run errored.
+
+    Stops the run at the first decisive tool call, so a positive query costs one turn."""
+    work = Path(tempfile.mkdtemp(prefix="cw-trig-"))
+    try:
+        skills = work / ".claude" / "skills" / SKILL_NAME
+        export_skill(None, skills)
+        if description:
+            (skills / "SKILL.md").write_text(set_description((skills / "SKILL.md").read_text(), description))
+        cmd = [args.claude, "-p", query, "--setting-sources", "project", "--strict-mcp-config",
+               "--tools", TOOLS, "--allowedTools", TOOLS, "--output-format", "stream-json", "--verbose",
+               "--max-turns", "4"]
+        if args.model:
+            cmd += ["--model", args.model]
+        proc = subprocess.Popen(cmd, cwd=work, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        verdict = None
+        deadline = time.time() + args.timeout
+        try:
+            for line in proc.stdout:
+                if time.time() > deadline:
+                    break
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") == "result":
+                    verdict = False
+                    break
+                if ev.get("type") != "assistant":
+                    continue
+                for b in ev["message"].get("content", []):
+                    if b.get("type") != "tool_use":
+                        continue
+                    if b["name"] == "Skill" and SKILL_NAME in json.dumps(b.get("input", {})):
+                        verdict = True
+                    elif b["name"] in ("WebSearch", "WebFetch"):
+                        verdict = False
+                    if verdict is not None:
+                        break
+                if verdict is not None:
+                    break
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
+        return verdict
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def cmd_triggers(args) -> None:
+    queries = json.loads((TESTS / "triggers.json").read_text())["queries"]
+    if args.split != "all":
+        queries = [q for q in queries if q["split"] == args.split]
+    description = Path(args.description_file).read_text().strip() if args.description_file else None
+    current = frontmatter_description()
+    print(f"description: {(description or current)[:110]}…\n{len(queries)} queries × {args.runs} runs", flush=True)
+    jobs = [(i, q) for i, q in enumerate(queries) for _ in range(args.runs)]
+    hits: dict[int, list[bool]] = {i: [] for i in range(len(queries))}
+    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        futures = {pool.submit(trigger_once, q["query"], description, args): i for i, q in jobs}
+        for f in as_completed(futures):
+            v = f.result()
+            if v is not None:
+                hits[futures[f]].append(v)
+    rows, correct = [], {"train": [0, 0], "test": [0, 0]}
+    for i, q in enumerate(queries):
+        h = hits[i]
+        rate = sum(h) / len(h) if h else 0.0
+        ok = (rate >= 0.5) == q["should_trigger"]
+        correct[q["split"]][0] += ok
+        correct[q["split"]][1] += 1
+        rows.append({**q, "trigger_rate": round(rate, 2), "runs": len(h), "pass": ok})
+        mark = "ok  " if ok else "MISS"
+        print(f"  {mark} {q['split']:5} want={'Y' if q['should_trigger'] else 'N'} "
+              f"rate={sum(h)}/{len(h)}  {q['query'][:80]}")
+    summary = {s: f"{c[0]}/{c[1]}" for s, c in correct.items() if c[1]}
+    print("\npassed:", summary)
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    out = RESULTS / f"triggers-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    out.write_text(json.dumps({"description": description or current, "summary": summary, "queries": rows},
+                              indent=2))
+    print(f"saved {out.relative_to(REPO)}")
+
+
+def frontmatter_description() -> str:
+    m = re.search(r"(?m)^description: (.*)$", (REPO / "SKILL.md").read_text())
+    return m.group(1) if m else ""
+
+
 # --------------------------------------------------------------------------- CLI
 
 
@@ -650,6 +757,15 @@ def main() -> None:
     g = sub.add_parser("grade", parents=[common], help="regrade an existing iteration")
     g.add_argument("iteration")
     g.set_defaults(func=cmd_grade)
+
+    t = sub.add_parser("triggers", parents=[common],
+                       help="does the description load the skill before the first search? (tests/triggers.json)")
+    t.add_argument("--description-file", help="candidate description to test instead of the one in SKILL.md")
+    t.add_argument("--split", choices=["train", "test", "all"], default="all")
+    t.add_argument("--runs", type=int, default=3, help="runs per query (default 3)")
+    t.add_argument("--model", help="model under test (default: your CLI default)")
+    t.add_argument("--timeout", type=int, default=180)
+    t.set_defaults(func=cmd_triggers)
 
     p = sub.add_parser("report", parents=[common], help="rewrite report.md for an iteration")
     p.add_argument("iteration")

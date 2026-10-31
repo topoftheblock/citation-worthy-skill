@@ -136,7 +136,16 @@ python3 tests/evals.py run --cases fabricated-quote --runs 3       # one case, c
 python3 tests/evals.py run --configs with_skill,old_skill --baseline-ref HEAD   # did my edit help?
 python3 tests/evals.py run --configs with_skill,claude_md          # skill vs. the CLAUDE.md block
 python3 tests/evals.py grade tests/results/iteration-1             # regrade without rerunning
+python3 tests/evals.py triggers                                    # does the description load the skill?
+python3 tests/evals.py triggers --description-file new.txt         # try a candidate description
 ```
+
+**`triggers`** checks the description on its own, using the 20 prompts in
+[`tests/triggers.json`](tests/triggers.json). Half are research prompts where the skill
+must load *before the first web search*; the other half are near-misses that mention
+sources, citations or URLs but need no research. Each prompt runs 3 times and stops at
+the first decisive tool call, so a full pass costs a few dollars. The prompts are split into
+train and test so a description isn't tuned to the prompts it is scored on.
 
 Results land in `tests/results/iteration-N/`: per run a `transcript.jsonl`,
 `outputs/trace.md` (readable tool trace), `outputs/answer.md`, `grading.json` and
@@ -154,11 +163,11 @@ the version before the refinements below.
 
 | | refined skill | previous skill | no skill | CLAUDE.md block |
 | --- | --- | --- | --- | --- |
-| **Shared checks** (the same 112 for every config) | **96%** | 87% | 68% | 95% |
+| **Shared checks** (the same 112 for every config) | **95%** | 87% | 68% | 96% |
 | Opened the primary source (Treasury, BLS, NVD, PubMed, project docs…) | 16/16 | 16/16 | 10/16 | 16/16 |
 | Research runs that opened no page at all | 2/20 | 2/20 | 9/20 | 2/20 |
 | Every cited URL was read, or marked unread | 22/24 | 12/24 | 6/24 | 24/24 |
-| Answer-quality checks (LLM judge) | 29/32 | 29/32 | 21/32 | 26/32 |
+| Answer-quality checks (LLM judge) | 26/30 | 27/30 | 19/30 | 26/30 |
 | No Tier 3 site fetched | 32/32 | 32/32 | 31/32 | 32/32 |
 | No web calls on the two non-research prompts | 4/4 | 4/4 | 4/4 | 4/4 |
 | Skill loaded before the first search | 14/16 | 14/16 | — | — |
@@ -181,16 +190,37 @@ What the numbers say:
 - **The CLAUDE.md block matches the skill** on shared checks. It is in context for every
   prompt, so it can't miss a trigger; the skill costs nothing on prompts that don't
   research.
-- **Known gaps:** the skill didn't load before the first search in 2 of 16 runs (the
-  fabricated-quote and source-as-subject prompts), and the SOURCE HALT block appeared
-  only in the run where it did load. The source-as-subject case is the weakest: the
-  judge caught Breitbart's article being used for facts about the order, not only for
-  its framing, in both refined-skill runs.
+- **Triggering was the remaining gap, and the description fix closed it.** In the table
+  above the skill didn't load before the first search in 2 of 16 runs: the fake-quote
+  and source-as-subject prompts, the two kinds of task the old description didn't name.
+  See *Description tuning* below.
+- **Still weak:** the source-as-subject case. The judge caught Breitbart's article being
+  used for facts about the order, not only for its framing, in 3 of 5 refined-skill runs
+  across both rounds.
 
 With 2 runs per cell, a difference of one or two checks is noise. The refined-skill
 column included one extra clause (state what kind of source a user's URL is even if
 the fetch fails) that was removed afterwards: tabloid sites block the fetch tool, so no
 case can exercise it, and it made no measurable difference.
+
+### Description tuning
+
+The old description named facts, figures and quotes but not *checking whether an
+attribution is genuine* or *comparing how outlets covered a story*. Claude treated
+those as ordinary searches and loaded the skill too late or not at all. The new
+description names both task types and says to load the skill before the first search.
+
+| `tests/evals.py triggers` (3 runs per prompt) | old description | new description |
+| --- | --- | --- |
+| Train set (6 research + 6 near-miss prompts) | 12/12 | 12/12 |
+| Held-out test set (4 + 4) | 7/8 | 8/8 |
+| Near-miss prompts that wrongly loaded the skill | 0/10 | 0/10 |
+
+The miss was "pull up how Jacobin and the WSJ editorial page wrote about the UAW
+strike", which loaded the skill in 1 of 3 runs before the change and 3 of 3 after.
+Rerunning the two full eval cases that had missed, 3 times each with the new
+description, the skill loaded before the first search in 6 of 6 runs, and all 3
+fake-quote runs ended in a SOURCE HALT block.
 
 ## Layout
 
@@ -206,6 +236,7 @@ citation-worthy/
     ├── lint_skill.py               # static checks
     ├── evals.py                    # behavioral eval runner + grader
     ├── cases.json                  # eval cases and their checks
+    ├── triggers.json               # prompts for the description trigger eval
     └── fixtures/                   # files placed into a case's working dir
 ```
 
